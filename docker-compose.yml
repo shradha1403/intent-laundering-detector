@@ -1,0 +1,22 @@
+# NOTE: written by inspection, not verified against a running Docker
+# daemon (not available in the environment this was authored in).
+# Run `docker compose up --build` yourself and treat any error as real
+# signal, not a formatting nitpick, before trusting this for a demo.
+#
+# Each service gets its own SQLite file inside its own container (the
+# broker API and the dashboard don't share a ledger in this setup,
+# matching how scripts/demo.py and scripts/dashboard.py already work
+# standalone). No shared volume, since nothing in the code currently
+# reads a configurable DB path, adding one here without wiring it up
+# in aui/storage/db.py would be a lie dressed up as a config option.
+services:
+  broker:
+    build: .
+    ports:
+      - "8000:8000"
+
+  dashboard:
+    build: .
+    command: ["streamlit", "run", "scripts/dashboard.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    ports:
+      - "8501:8501"
