@@ -43,6 +43,24 @@ class AgentIdentity:
     def generate(cls, agent_id: str) -> "AgentIdentity":
         return cls(agent_id=agent_id, _private_key=Ed25519PrivateKey.generate())
 
+    @classmethod
+    def from_private_key_b64(cls, agent_id: str, private_key_b64: str) -> "AgentIdentity":
+        """Reconstruct an identity from a persisted private key, so a
+        BrokerService can reload an agent that was registered in a
+        previous process (see aui/storage/models.py::AgentKeyRow for why
+        this is now persisted, and the tradeoff that comes with it)."""
+        raw = _unb64(private_key_b64)
+        return cls(agent_id=agent_id, _private_key=Ed25519PrivateKey.from_private_bytes(raw))
+
+    @property
+    def private_key_b64(self) -> str:
+        raw = self._private_key.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        return _b64(raw)
+
     @property
     def public_key_b64(self) -> str:
         raw = self._private_key.public_key().public_bytes(
@@ -69,5 +87,14 @@ def verify_signature(public_key_b64: str, content_hash_hex: str, signature_b64: 
         pub_key = Ed25519PublicKey.from_public_bytes(pub_bytes)
         pub_key.verify(_unb64(signature_b64), content_hash_hex.encode("ascii"))
         return True
-    except (InvalidSignature, ValueError, Exception):
+    except (InvalidSignature, ValueError):
+        # InvalidSignature: signature genuinely doesn't match (tampering,
+        # wrong key). ValueError: malformed base64 (binascii.Error is a
+        # ValueError subclass) or wrong-length key bytes. Both are real
+        # "this input is bad" cases, which is what callers need a False
+        # for. Previously this also caught bare Exception, which silently
+        # turned any programming bug in this function into "signature
+        # invalid" instead of surfacing it - found during the security
+        # audit, not by a failing test, since nothing here happened to
+        # throw anything else yet.
         return False

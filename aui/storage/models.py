@@ -37,6 +37,22 @@ class AgentKeyRow(Base):
 
     agent_id = Column(String, primary_key=True)
     public_key_b64 = Column(String, nullable=False)
+    # Nullable, and a real security tradeoff, not a free upgrade: this
+    # persists agent PRIVATE key material in the same SQLite file as
+    # the ledger itself, so a BrokerService can reload an agent's
+    # signing identity after a restart instead of the agent becoming
+    # permanently unable to sign (a Critical finding from a security
+    # audit - BrokerService._identities was in-memory only, so any
+    # process restart or second worker made every previously-registered
+    # agent unable to create new envelopes). Storing the private key
+    # here is consistent with, not worse than, this MVP's already-
+    # documented trust model (the Broker is a single trusted service
+    # that can already rewrite the ledger's meaning of "trusted" - see
+    # README). A real deployment should keep signing keys in a KMS/HSM
+    # that is NOT the same store as the audit ledger, so compromising
+    # the ledger doesn't also hand over every agent's signing key.
+    # That's not built here; flagging it rather than hiding it.
+    private_key_b64 = Column(String, nullable=True)
     created_at = Column(String, default=lambda: datetime.now(timezone.utc).isoformat())
     revoked_at = Column(String, nullable=True)
 

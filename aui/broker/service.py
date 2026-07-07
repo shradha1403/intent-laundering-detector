@@ -32,7 +32,31 @@ class BrokerService:
     def register_agent(self, agent_id: str) -> AgentIdentity:
         identity = AgentIdentity.generate(agent_id)
         self._identities[agent_id] = identity
-        self.repo.register_key(agent_id, identity.public_key_b64)
+        # Private key is persisted alongside the public key, not just
+        # kept in-memory, so a restarted or second BrokerService can
+        # still sign on this agent's behalf. See AgentKeyRow's docstring
+        # in aui/storage/models.py for exactly what this trades away.
+        self.repo.register_key(agent_id, identity.public_key_b64, identity.private_key_b64)
+        return identity
+
+    def _get_identity(self, agent_id: str) -> Optional[AgentIdentity]:
+        """Look up an agent's signing identity, checking the in-memory
+        cache first and falling back to reloading it from the persisted
+        private key if this process didn't register the agent itself
+        (e.g. a restart, or a second BrokerService over the same DB).
+        Found necessary by a security audit that spun up a second
+        BrokerService over the same DB and got `unknown agent` on an
+        agent the first instance had already registered - that failure
+        is exactly what this fallback closes."""
+        identity = self._identities.get(agent_id)
+        if identity is not None:
+            return identity
+
+        private_key_b64 = self.repo.get_private_key(agent_id)
+        if private_key_b64 is None:
+            return None
+        identity = AgentIdentity.from_private_key_b64(agent_id, private_key_b64)
+        self._identities[agent_id] = identity
         return identity
 
     # ---- envelope creation --------------------------------------------------
@@ -42,7 +66,7 @@ class BrokerService:
         intent: Intent,
         parent_envelope_id: Optional[str] = None,
     ) -> Envelope:
-        identity = self._identities.get(agent_id)
+        identity = self._get_identity(agent_id)
         if identity is None:
             raise ValueError(f"unknown agent {agent_id!r}, call register_agent first")
 
@@ -87,8 +111,17 @@ class BrokerService:
             raise ValueError(f"unknown envelope {leaf_envelope_id!r}")
         root, leaf = chain[0], chain[-1]
 
-        score, flags = self.engine.transitive(root, leaf)
-        threshold = self.engine.thresholds.transitive(leaf.intent.structured.resource)
+        # threshold comes back from engine.transitive() itself rather than
+        # being recomputed here. It used to be recomputed from
+        # leaf.intent.structured.resource - the agent's own self-declared
+        # resource, the exact field the engine deliberately does not
+        # trust for this check (see actual_resource_touched in
+        # engine.py). That meant the threshold recorded in the ledger
+        # could disagree with the one the engine actually decided
+        # pass/fail against. Found during a security audit, fixed by
+        # making the engine the single source of truth for its own
+        # threshold instead of letting the caller guess it a second way.
+        score, flags, threshold = self.engine.transitive(root, leaf)
         self.repo.save_fidelity_score(leaf.envelope_id, "transitive", score, threshold, not flags, flags)
 
         leaf.fidelity.transitive_score = score

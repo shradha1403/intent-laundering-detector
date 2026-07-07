@@ -2,7 +2,9 @@
 
 ## Status as of today
 
-Built and passing (22/22 tests, live demo and dashboard both run end to end):
+An independent adversarial audit and remediation pass happened after everything below was originally built - see `docs/AUDIT.md` for the full findings, every fix that was actually made (with diffs and re-verification, not just recommendations), and what's still open with why. Short version: two Critical findings (in-memory-only agent keys breaking the API across a restart, and zero authentication on any API route) got fixed, several Medium/High findings got fixed, and real architectural gaps (fan-out/fan-in delegation, true agent attestation, a real embedding backend) got left open with honest effort estimates rather than papered over.
+
+Built and passing (35/35 tests, live demo and dashboard both run end to end):
 
 - Intent Envelope schema, Ed25519 signing, canonical-JSON hashing, hash-chain build + verify
 - SQLite-backed ledger (envelopes, agent keys, fidelity scores) via a repository layer

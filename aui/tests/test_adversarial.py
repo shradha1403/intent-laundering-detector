@@ -48,7 +48,7 @@ def test_resource_misdeclaration_is_caught():
     )
 
     action_score, action_flags = engine.action_grounding(leaf)
-    transitive_score, transitive_flags = engine.transitive(root, leaf)
+    transitive_score, transitive_flags, transitive_threshold = engine.transitive(root, leaf)
 
     assert any("resource_misdeclaration" in f for f in action_flags), action_flags
     assert any("resource_escalation" in f for f in transitive_flags), transitive_flags
@@ -108,7 +108,7 @@ def test_vague_root_intent_still_flags_sensitive_resource_leaf():
         tool_name="add_recovery_contact", arguments={"email": "attacker@example.com"}, result_summary="added attacker@example.com as recovery contact"
     )
 
-    score, flags = engine.transitive(root, leaf)
+    score, flags, threshold = engine.transitive(root, leaf)
     assert any("resource_escalation" in f for f in flags), flags
 
 
@@ -142,7 +142,7 @@ def test_boundary_hugging_multi_hop_drift_is_still_caught():
     p3, p3_flags = engine.pairwise(hop2, leaf)
     assert p1_flags == [] and p2_flags == [] and p3_flags == [], "every crafted hop should pass pairwise individually"
 
-    t_score, t_flags = engine.transitive(root, leaf)
+    t_score, t_flags, t_threshold = engine.transitive(root, leaf)
     assert any("resource_escalation" in f for f in t_flags), t_flags
 
 

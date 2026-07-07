@@ -30,6 +30,8 @@ Action-grounding asks whether the agent's actual tool call matches what it said 
 
 Transitive asks the question that actually matters: compared directly against the root intent, not chained pairwise score to pairwise score, does the leaf action still serve the original request? This is the one built specifically to catch a "boiling frog" pattern, where a chain starts at "book me a flight," passes through calendar checks and payment lookups that each look totally reasonable next to their immediate parent, and ends up adding a new recovery email to the account. Every individual hop passes. Only comparing the very first request against the very last action exposes that the chain wandered somewhere nobody authorized.
 
+Worth being exact about how, since an independent audit called out that earlier drafts of this writeup made it sound more sophisticated than it is: what actually catches that recovery-email example isn't a semantic model deciding the wording drifted. It's a categorical rule, grounded in the real tool call rather than what the agent claims about itself, that asks "is this a sensitive resource the root task never expected to touch." If yes, flagged, regardless of how innocuous the wording sounds. The text-similarity score between root and leaf is a secondary signal riding along on top of that, not the thing doing the actual catching. So: a real, working control, just a simpler and more brittle one than "semantic drift detection" implies. It generalizes only as far as the hand-authored list of expected sensitive sub-resources per task type, which is itself a disclosed limitation, not a hidden one, see `docs/AUDIT.md`.
+
 ## Stage 3: how it's wired together
 
 Agents don't get direct access to real tools. Every action goes through an interceptor, which is the only path any agent has to actually do something, and the interceptor reports to a broker (a framework-agnostic service with a thin FastAPI layer on top). The broker runs the three-stage check, writes everything to a hash-chained ledger in SQLite, and a Streamlit dashboard shows the whole chain hop by hop, with a laundering banner when something gets flagged and a forensic report you can read like an incident writeup. Nothing in the pipeline calls a cloud model, so a live demo doesn't depend on internet access working in the room.
@@ -50,14 +52,17 @@ I also tried to upgrade the similarity backend from plain lexical word overlap t
 
 ## What this doesn't do yet
 
-It's a working proof of the detection idea, not a deployable product. The eight tools it uses (search flights, check calendar, send email, and so on) are hand-written stand-ins, not real hooks into an actual agent framework, so plugging this into a real multi-agent system would mean rewriting the interceptor to sit in front of whatever real tool calls that system makes. The broker is a single trusted service with no attestation on agent identity, so anyone who can call `register_agent` can mint one, which is fine for a demo and not fine for production. And the chain model only handles a straight line of delegation, one parent per hop, with no way to represent an agent that forks work into parallel branches and merges the results back together. All of that is written down honestly in the repo rather than hidden, because a security project that overclaims what it covers is a worse look than one that's upfront about its gaps.
+It's a working proof of the detection idea, not a deployable product. The eight tools it uses (search flights, check calendar, send email, and so on) are hand-written stand-ins, not real hooks into an actual agent framework, so plugging this into a real multi-agent system would mean rewriting the interceptor to sit in front of whatever real tool calls that system makes. And the chain model only handles a straight line of delegation, one parent per hop, with no way to represent an agent that forks work into parallel branches and merges the results back together. All of that was written down honestly in the repo from the start.
+
+An independent adversarial audit went further than that self-assessment and found things the docs hadn't disclosed: the API had zero authentication on any route (anyone who could reach the port could write to the ledger), and the broker kept agent signing keys in memory only, so a restart made every previously-registered agent unable to sign anything new. Both got fixed, with tests proving it (`docs/AUDIT.md` has the full writeup, the diffs, and the before/after verification). What's still true and still open: agent identity is self-registered, not attested - the API now requires a shared token to call `register_agent` at all, which raises the bar from "zero effort" to "you need the broker's credential," but it does not stop someone holding that credential from minting an identity under any name they like. Real attestation needs hardware-backed keys or mTLS client certs, which is genuinely out of scope for something that runs on a laptop, not a gap that was just easier to leave unfixed.
 
 ## Try it
 
 ```
 git clone <repo-url>
 pip install -r requirements.txt
-pytest -v                          # 22 tests: crypto, chain integrity, fidelity engine, red-team cases
+pytest -v                          # 35 tests: crypto, chain integrity, fidelity engine, red-team cases,
+                                    # the FastAPI layer, broker-restart survival, concurrency, tool-map consistency
 python scripts/demo.py             # normal delegation + two laundering patterns, end to end
 python scripts/evaluate.py         # the 18-case benchmark, both similarity backends
 streamlit run scripts/dashboard.py # the same three scenarios, live and visual

@@ -6,14 +6,25 @@
 # Each service gets its own SQLite file inside its own container (the
 # broker API and the dashboard don't share a ledger in this setup,
 # matching how scripts/demo.py and scripts/dashboard.py already work
-# standalone). No shared volume, since nothing in the code currently
-# reads a configurable DB path, adding one here without wiring it up
-# in aui/storage/db.py would be a lie dressed up as a config option.
+# standalone). No shared volume: AUI_DB_URL IS wired up in
+# aui/broker/app.py (added after a security audit found the DB path
+# was previously hardcoded), but a shared volume plus two containers
+# both writing SQLite is asking for the exact lock contention
+# docs/AUDIT.md already flags as untested at scale - not worth adding
+# here without a real Postgres swap to go with it.
+#
+# AUI_API_KEY: set this yourself for anything beyond throwing the
+# container away after the demo. If unset, the broker generates and
+# prints a one-time token to its own container logs on startup
+# (`docker compose logs broker`) - fine for a demo, useless for anyone
+# who needs the token without shelling into the container.
 services:
   broker:
     build: .
     ports:
       - "8000:8000"
+    environment:
+      - AUI_API_KEY=${AUI_API_KEY:-}
 
   dashboard:
     build: .

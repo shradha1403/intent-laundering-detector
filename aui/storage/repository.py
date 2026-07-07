@@ -16,18 +16,27 @@ class EnvelopeRepository:
     """
 
     # ---- agent identity -----------------------------------------------
-    def register_key(self, agent_id: str, public_key_b64: str) -> None:
+    def register_key(self, agent_id: str, public_key_b64: str, private_key_b64: Optional[str] = None) -> None:
         with get_session() as s:
             existing = s.get(AgentKeyRow, agent_id)
             if existing:
                 existing.public_key_b64 = public_key_b64
+                if private_key_b64 is not None:
+                    existing.private_key_b64 = private_key_b64
             else:
-                s.add(AgentKeyRow(agent_id=agent_id, public_key_b64=public_key_b64))
+                s.add(AgentKeyRow(agent_id=agent_id, public_key_b64=public_key_b64, private_key_b64=private_key_b64))
 
     def get_public_key(self, agent_id: str) -> Optional[str]:
         with get_session() as s:
             row = s.get(AgentKeyRow, agent_id)
             return row.public_key_b64 if row else None
+
+    def get_private_key(self, agent_id: str) -> Optional[str]:
+        """Used to reload an agent's signing identity after a restart -
+        see AgentKeyRow's docstring for the tradeoff this involves."""
+        with get_session() as s:
+            row = s.get(AgentKeyRow, agent_id)
+            return row.private_key_b64 if row else None
 
     def all_public_keys(self) -> dict[str, str]:
         with get_session() as s:

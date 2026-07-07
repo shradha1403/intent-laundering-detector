@@ -136,7 +136,25 @@ class FidelityThresholds:
     # torch installing, see backend.py), expect another retuning pass,
     # a real semantic model can likely support stricter thresholds
     # without the same false-positive risk.
-    pairwise_default: float = 0.15
+    # pairwise_default was 0.15 originally, which a security audit
+    # flagged as effectively inert: the lexical backend's own floor for
+    # maximally-unrelated text ("book me a flight to SF" vs "delete all
+    # production databases now") measured at 0.13-0.18 across five
+    # sampled pairs, meaning almost any shared-vocabulary text cleared
+    # 0.15 trivially. Measured, not assumed: see the score dump in
+    # docs/EVALUATION.md. Raised to 0.17 after checking it against every
+    # benign case in aui/benchmark.py plus the full test suite (still
+    # 22/22, still 1.0 precision on the lexical backend). 0.20 was tried
+    # first and rejected: it broke a genuinely benign cross-domain hop
+    # (benign_calendar_schedule's calendar->email transition scores
+    # 0.182, inside the noise floor of unrelated pairs). 0.17 is a real,
+    # verified improvement, not a full fix - the lexical backend simply
+    # doesn't have enough headroom to fully separate "benign but
+    # different domain" from "unrelated," which is exactly why
+    # action-grounding and the transitive resource-escalation check
+    # (both categorical, not text-similarity-based) carry the actual
+    # detection weight in this system rather than this stage.
+    pairwise_default: float = 0.17
     pairwise_sensitive: float = 0.45
     action_grounding_default: float = 0.5
     transitive_default: float = 0.15
@@ -249,11 +267,25 @@ class FidelityEngine:
         return score, flags
 
     # ---- stage 3: transitive ------------------------------------------------
-    def transitive(self, root: Envelope, leaf: Envelope) -> tuple[float, list[str]]:
+    def transitive(self, root: Envelope, leaf: Envelope) -> tuple[float, list[str], float]:
         """Compare the leaf's actual action directly against the ROOT
         intent, not against its immediate parent. This is the check
         that catches laundering that survives every individual
         pairwise hop because each step only drifted a little.
+
+        Returns (score, flags, threshold_used). The threshold is
+        returned rather than left for the caller to recompute, on
+        purpose: a security audit found that aui/broker/service.py was
+        independently recomputing "the" transitive threshold from
+        leaf.intent.structured.resource (the self-declared field this
+        exact function deliberately does NOT trust, see
+        actual_resource_touched below), while this function decides
+        pass/fail using a different, grounded resource. The two could
+        disagree, so the forensic report could display a threshold that
+        was not actually the one the decision was made against. Returning
+        the real threshold from the one place that computes it removes
+        the second, divergent computation instead of just fixing its
+        input.
         """
         flags: list[str] = []
 
@@ -297,4 +329,4 @@ class FidelityEngine:
         if score < threshold and not is_escalation:
             flags.append(f"cumulative_drift(score={score:.2f},threshold={threshold:.2f})")
 
-        return score, flags
+        return score, flags, threshold

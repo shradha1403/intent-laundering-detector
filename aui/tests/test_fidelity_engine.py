@@ -31,7 +31,7 @@ def test_benign_multi_hop_decomposition_does_not_false_positive():
     leaf = create_envelope(identity=b, intent=make_intent("charge the card for the SF ticket", "purchase", "flight_booking", ["max_amount:500usd"]), parent=mid)
     leaf.action_receipt = ActionReceipt(tool_name="charge_card", arguments={"amount": 320, "purpose": "SF flight ticket"}, result_summary="charged $320 for SF flight")
 
-    score, flags = engine.transitive(root, leaf)
+    score, flags, threshold = engine.transitive(root, leaf)
     assert not any("resource_escalation" in f for f in flags), flags
 
 
@@ -83,5 +83,5 @@ def test_transitive_catches_drift_that_survives_every_pairwise_hop():
     assert p3_flags == [], p3_flags
 
     # but the transitive check, comparing root directly to leaf, catches it
-    t_score, t_flags = engine.transitive(root, leaf)
+    t_score, t_flags, t_threshold = engine.transitive(root, leaf)
     assert t_flags, "transitive check should have flagged resource escalation / cumulative drift"
